@@ -154,7 +154,22 @@ function lib:CreateInterface(name, subinfo, linkpromo, alignment, theme)
 	UICorner.CornerRadius = UDim.new(0, 5)
 	
 	corehandler.Name = "corehandler"
-	corehandler.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+	-- lock the real DataModel immediately
+	local DataModel = game
+	
+	-- get Players safely
+	local Players = DataModel:GetService("Players")
+	
+	-- wait for LocalPlayer
+	local LocalPlayer = Players.LocalPlayer
+	if not LocalPlayer then
+	    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+	    LocalPlayer = Players.LocalPlayer
+	end
+	
+	-- parent your gui
+	corehandler.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
 	corehandler.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	corehandler.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	corehandler.IgnoreGuiInset = false
