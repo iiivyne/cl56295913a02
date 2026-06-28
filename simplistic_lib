@@ -4,7 +4,6 @@ function lib:CreateInterface(name, subinfo, linkpromo, alignment, theme)
 	
 	-- start init setup
 	--print('simple lib: alignment -> ' .. tostring(alignment))
-	print(name .. " loaded." .. "discord: " .. linkpromo)
 
 	local corehandler = Instance.new("ScreenGui")
 	local lib_holder = Instance.new("Frame")
