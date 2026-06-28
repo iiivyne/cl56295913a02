@@ -12,7 +12,7 @@ function lib:CreateInterface(name, alignment)
 	print('simple lib: loaded script functionality')
 	print('simple lib: loaded script -> ' .. tostring(name))
 	print('simple lib: alignment -> ' .. tostring(alignment))
-	print('simple lib: user -> ' .. tostring(game.Players.LocalPlayer))
+	--print('simple lib: user -> ' .. tostring(game.Players.LocalPlayer))
 	print('simple lib: version: 0.0.1')
 
 	-- ScreenGui and topbar
