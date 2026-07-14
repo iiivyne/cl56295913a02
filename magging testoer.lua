@@ -1,4 +1,4 @@
-local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/NexityHereLol/robloxluascripts/refs/heads/main/simplistic_lib"))()
+local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/iiivyne/cl56295913a02/refs/heads/main/simplistic_lib.lua"))()
 local int = lib:CreateInterface("⚡ Magnet Catch", "client:" .. math.random(), "https://discord.gg/ZNTHTWx7KE", "bottom left", "royal")
 local main = int:CreateTab("mag", "mag script", "default")
 local player_p = int:CreateTab("player", "player script", "info")
