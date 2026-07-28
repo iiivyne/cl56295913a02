@@ -9,70 +9,124 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Configuration
 local CONFIG = {
-    FarmDelay = 0.5,
-    TeleportDistance = 5,
+    FarmDelay = 1,
     AutoGrindNormal = false,
     AutoGrindBoss = false,
     AutoGrindBoth = false,
-    AutoClick = true,
-    ClickDelay = 0.1,
 }
 
 -- State
 local farmRunning = false
 local farmLoop = nil
-local currentTarget = nil
-local isAttacking = false
 
--- Ember Village Scroll Locations (update these based on actual positions)
-local SCROLL_LOCATIONS = {
-    Normal = {
-        -- Add actual scroll positions here
-        -- Example: CFrame.new(x, y, z)
-    },
-    Boss = {
-        -- Add actual boss scroll positions here
-        -- Example: CFrame.new(x, y, z)
-    }
-}
+-- ============ NORMAL MISSION FUNCTIONS ============
 
--- Find scrolls in workspace
-local function findScrolls()
-    local scrolls = {
-        Normal = {},
-        Boss = {}
-    }
+-- Find all NPCs in the village that give missions
+local function findMissionNPCs()
+    local npcs = {}
     
-    -- Search for scroll parts in workspace
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name:lower():match("scroll") then
-            local parent = obj.Parent
-            if parent then
-                local parentName = parent.Name:lower()
-                if parentName:match("boss") or parentName:match("mission") then
-                    table.insert(scrolls.Boss, obj)
-                else
-                    table.insert(scrolls.Normal, obj)
-                end
-            end
-        end
-    end
-    
-    -- Also check for mission givers
+    -- Check main mission givers folder
     local missionGivers = Workspace:FindFirstChild("missiongivers")
     if missionGivers then
         for _, child in ipairs(missionGivers:GetChildren()) do
             if child:FindFirstChild("CLIENTTALK") then
-                table.insert(scrolls.Normal, child)
+                table.insert(npcs, {
+                    Name = child.Name,
+                    Object = child,
+                    Type = "normal"
+                })
             end
         end
     end
     
-    -- Check boss missions
+    -- Also check for NPCs with CLIENTTALK in workspace
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj:FindFirstChild("CLIENTTALK") then
+            -- Check if it's already in the list
+            local exists = false
+            for _, npc in ipairs(npcs) do
+                if npc.Object == obj then
+                    exists = true
+                    break
+                end
+            end
+            if not exists then
+                table.insert(npcs, {
+                    Name = obj.Name,
+                    Object = obj,
+                    Type = "normal"
+                })
+            end
+        end
+    end
+    
+    return npcs
+end
+
+-- Teleport to NPC and start conversation
+local function teleportToNPCAndTalk(npc)
+    if not npc or not npc.Object then return false end
+    
+    local character = LocalPlayer.Character
+    if not character then return false end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    
+    -- Find the NPC's primary part
+    local targetPart = npc.Object:FindFirstChild("HumanoidRootPart") or npc.Object:FindFirstChild("Head")
+    if not targetPart then 
+        -- Try to find any BasePart
+        for _, child in ipairs(npc.Object:GetChildren()) do
+            if child:IsA("BasePart") then
+                targetPart = child
+                break
+            end
+        end
+    end
+    
+    if not targetPart then
+        print("❌ Could not find target part for NPC:", npc.Name)
+        return false
+    end
+    
+    -- Teleport to NPC (in front of them)
+    local teleportPos = targetPart.Position + Vector3.new(0, 2, 3)
+    pcall(function()
+        hrp.CFrame = CFrame.new(teleportPos)
+        print("✅ Teleported to NPC:", npc.Name)
+    end)
+    
+    -- Wait a moment for teleport to register
+    task.wait(0.3)
+    
+    -- Use CLIENTTALK to engage conversation
+    local talkEvent = npc.Object:FindFirstChild("CLIENTTALK")
+    if talkEvent then
+        pcall(function()
+            talkEvent:FireServer("accept")
+            print("✅ Started conversation with NPC:", npc.Name)
+            return true
+        end)
+    else
+        print("❌ No CLIENTTALK found for NPC:", npc.Name)
+        return false
+    end
+    
+    return true
+end
+
+-- ============ BOSS MISSION FUNCTIONS ============
+
+-- Find all boss mission scrolls
+local function findBossScrolls()
+    local scrolls = {}
+    
+    -- Check boss drop mission folder
     local bossMission = Workspace:FindFirstChild("bossdropmission")
     if bossMission then
         local missionsFolder = bossMission:FindFirstChild("missions")
@@ -80,7 +134,30 @@ local function findScrolls()
             for _, child in ipairs(missionsFolder:GetChildren()) do
                 local missionGiver = child:FindFirstChild("missiongiver")
                 if missionGiver and missionGiver:FindFirstChild("CLIENTTALK") then
-                    table.insert(scrolls.Boss, missionGiver)
+                    table.insert(scrolls, {
+                        Name = child.Name,
+                        Object = missionGiver,
+                        Type = "boss"
+                    })
+                end
+            end
+        end
+    end
+    
+    -- Also search for scrolls in workspace
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():match("scroll") then
+            local parent = obj.Parent
+            if parent and parent.Name:lower():match("boss") then
+                -- Check if this scroll has CLIENTTALK somewhere
+                local talkEvent = parent:FindFirstChild("CLIENTTALK") or obj:FindFirstChild("CLIENTTALK")
+                if talkEvent then
+                    table.insert(scrolls, {
+                        Name = parent.Name or obj.Name,
+                        Object = parent or obj,
+                        Type = "boss",
+                        Part = obj
+                    })
                 end
             end
         end
@@ -89,9 +166,9 @@ local function findScrolls()
     return scrolls
 end
 
--- Teleport to scroll
-local function teleportToScroll(scroll)
-    if not scroll then return false end
+-- Teleport to boss scroll and start mission
+local function teleportToBossScroll(scroll)
+    if not scroll or not scroll.Object then return false end
     
     local character = LocalPlayer.Character
     if not character then return false end
@@ -99,187 +176,57 @@ local function teleportToScroll(scroll)
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     
-    local targetCFrame
-    if scroll:IsA("BasePart") then
-        targetCFrame = scroll.CFrame
-    else
-        -- If it's a model, find its primary part
-        local primary = scroll:FindFirstChild("HumanoidRootPart") or scroll:FindFirstChild("Head")
-        if primary then
-            targetCFrame = primary.CFrame
-        else
-            return false
+    -- Find the scroll's position
+    local targetPart = scroll.Part or scroll.Object:FindFirstChild("HumanoidRootPart") or scroll.Object:FindFirstChild("Head")
+    
+    if not targetPart then
+        -- Try to find any BasePart
+        for _, child in ipairs(scroll.Object:GetChildren()) do
+            if child:IsA("BasePart") then
+                targetPart = child
+                break
+            end
         end
+    end
+    
+    if not targetPart then
+        print("❌ Could not find target part for boss scroll:", scroll.Name)
+        return false
     end
     
     -- Teleport to scroll
+    local teleportPos = targetPart.Position + Vector3.new(0, 2, 0)
     pcall(function()
-        hrp.CFrame = targetCFrame + Vector3.new(0, 2, 0) -- Slightly above
-        print("✅ Teleported to scroll")
-        return true
+        hrp.CFrame = CFrame.new(teleportPos)
+        print("✅ Teleported to boss scroll:", scroll.Name)
     end)
     
-    return false
-end
-
--- Interact with scroll (accept mission)
-local function interactWithScroll(scroll)
-    if not scroll then return false end
+    -- Wait a moment for teleport to register
+    task.wait(0.3)
     
-    -- Try to find CLIENTTALK or click event
-    local talkEvent = scroll:FindFirstChild("CLIENTTALK")
+    -- Use CLIENTTALK to start boss mission
+    local talkEvent = scroll.Object:FindFirstChild("CLIENTTALK")
+    if not talkEvent then
+        talkEvent = targetPart:FindFirstChild("CLIENTTALK")
+    end
+    
     if talkEvent then
         pcall(function()
             talkEvent:FireServer("accept")
-            print("✅ Accepted mission from scroll")
+            print("✅ Started boss mission:", scroll.Name)
             return true
         end)
-    end
-    
-    -- Alternative: Check for click detector
-    local clickDetector = scroll:FindFirstChildWhichIsA("ClickDetector")
-    if clickDetector then
-        pcall(function()
-            clickDetector:Click()
-            print("✅ Clicked scroll")
-            return true
-        end)
-    end
-    
-    return false
-end
-
--- Find nearest enemy/mob
-local function findNearestEnemy()
-    local character = LocalPlayer.Character
-    if not character then return nil end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-    
-    local nearest = nil
-    local nearestDist = math.huge
-    
-    -- Search for NPCs/mobs in workspace
-    local npcFolder = Workspace:FindFirstChild("npc")
-    if npcFolder then
-        for _, child in ipairs(npcFolder:GetChildren()) do
-            if child:IsA("Model") and child:FindFirstChild("HumanoidRootPart") then
-                -- Skip if it's a player
-                if not Players:GetPlayerFromCharacter(child) then
-                    local targetHrp = child.HumanoidRootPart
-                    local distance = (hrp.Position - targetHrp.Position).Magnitude
-                    
-                    -- Check if alive
-                    local humanoid = child:FindFirstChildWhichIsA("Humanoid")
-                    if humanoid and humanoid.Health > 0 then
-                        if distance < nearestDist then
-                            nearest = child
-                            nearestDist = distance
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Also search in workspace for other enemies
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") and obj:FindFirstChildWhichIsA("Humanoid") then
-            if not Players:GetPlayerFromCharacter(obj) and not obj.Name:match("scroll") then
-                local targetHrp = obj.HumanoidRootPart
-                local distance = (hrp.Position - targetHrp.Position).Magnitude
-                
-                local humanoid = obj:FindFirstChildWhichIsA("Humanoid")
-                if humanoid and humanoid.Health > 0 then
-                    if distance < nearestDist then
-                        nearest = obj
-                        nearestDist = distance
-                    end
-                end
-            end
-        end
-    end
-    
-    return nearest, nearestDist
-end
-
--- Teleport to enemy and attack
-local function teleportToEnemyAndAttack()
-    local enemy, distance = findNearestEnemy()
-    if not enemy then 
-        print("ℹ️ No enemies found")
-        return false 
-    end
-    
-    local character = LocalPlayer.Character
-    if not character then return false end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    
-    local enemyHrp = enemy:FindFirstChild("HumanoidRootPart")
-    if not enemyHrp then return false end
-    
-    -- Teleport to enemy
-    pcall(function()
-        -- Teleport slightly above and behind enemy
-        local teleportPos = enemyHrp.Position + Vector3.new(0, 3, 5)
-        hrp.CFrame = CFrame.new(teleportPos)
-        print("✅ Teleported to enemy:", enemy.Name)
-    end)
-    
-    -- Attack if enabled
-    if CONFIG.AutoClick then
-        attackEnemy()
+    else
+        print("❌ No CLIENTTALK found for boss scroll:", scroll.Name)
+        return false
     end
     
     return true
 end
 
--- Attack enemy (simulate M1 clicks)
-local function attackEnemy()
-    if isAttacking then return end
-    isAttacking = true
-    
-    pcall(function()
-        -- Try different attack methods
-        local character = LocalPlayer.Character
-        if not character then 
-            isAttacking = false
-            return 
-        end
-        
-        -- Method 1: Simulate mouse click
-        UserInputService.InputBegan:Connect(function(input, gameProcessed)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                -- Already clicking
-            end
-        end)
-        
-        -- Method 2: Try to find attack remote
-        local attackRemote = ReplicatedStorage:FindFirstChild("Attack")
-        if attackRemote then
-            attackRemote:FireServer()
-        end
-        
-        -- Method 3: Simulate key press (M1)
-        local VirtualInputManager = game:GetService("VirtualInputManager")
-        if VirtualInputManager then
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, Enum.UserInputType.MouseButton1, 0)
-            task.wait(CONFIG.ClickDelay)
-            VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, Enum.UserInputType.MouseButton1, 0)
-        end
-        
-        print("⚔️ Attacked enemy")
-    end)
-    
-    task.wait(CONFIG.ClickDelay)
-    isAttacking = false
-end
+-- ============ MAIN FARM LOOP ============
 
--- Main grind loop
-local function grindLoop()
+local function farmLoopFunction()
     while farmRunning do
         local character = LocalPlayer.Character
         if not character then 
@@ -287,42 +234,34 @@ local function grindLoop()
             continue 
         end
         
-        print("🔄 Grinding cycle...")
+        print("🔄 Farming cycle...")
         
-        -- Find scrolls
-        local scrolls = findScrolls()
-        local scrollToUse = nil
-        
-        -- Determine which scroll to use based on settings
-        if CONFIG.AutoGrindBoth then
-            -- Find any available scroll
-            if #scrolls.Normal > 0 then
-                scrollToUse = scrolls.Normal[1]
-            elseif #scrolls.Boss > 0 then
-                scrollToUse = scrolls.Boss[1]
+        -- Handle Normal Missions
+        if CONFIG.AutoGrindNormal or CONFIG.AutoGrindBoth then
+            print("📋 Looking for normal missions...")
+            local npcs = findMissionNPCs()
+            if #npcs > 0 then
+                for _, npc in ipairs(npcs) do
+                    teleportToNPCAndTalk(npc)
+                    task.wait(CONFIG.FarmDelay)
+                end
+            else
+                print("ℹ️ No normal mission NPCs found")
             end
-        elseif CONFIG.AutoGrindNormal and #scrolls.Normal > 0 then
-            scrollToUse = scrolls.Normal[1]
-        elseif CONFIG.AutoGrindBoss and #scrolls.Boss > 0 then
-            scrollToUse = scrolls.Boss[1]
         end
         
-        -- Teleport to scroll and interact
-        if scrollToUse then
-            print("📋 Found scroll:", scrollToUse.Name)
-            teleportToScroll(scrollToUse)
-            task.wait(1)
-            interactWithScroll(scrollToUse)
-            task.wait(1)
-        else
-            print("ℹ️ No scrolls found")
-        end
-        
-        -- Find and fight enemies
-        local enemyFound = teleportToEnemyAndAttack()
-        
-        if not enemyFound then
-            print("⏳ No enemies, waiting...")
+        -- Handle Boss Missions
+        if CONFIG.AutoGrindBoss or CONFIG.AutoGrindBoth then
+            print("👑 Looking for boss missions...")
+            local scrolls = findBossScrolls()
+            if #scrolls > 0 then
+                for _, scroll in ipairs(scrolls) do
+                    teleportToBossScroll(scroll)
+                    task.wait(CONFIG.FarmDelay)
+                end
+            else
+                print("ℹ️ No boss scrolls found")
+            end
         end
         
         print("⏳ Waiting", CONFIG.FarmDelay, "seconds...")
@@ -335,28 +274,13 @@ local function startFarming()
     if farmRunning then return end
     farmRunning = true
     print("🚀 Auto-farm started!")
-    task.spawn(grindLoop)
+    task.spawn(farmLoopFunction)
 end
 
 local function stopFarming()
     if not farmRunning then return end
     farmRunning = false
-    isAttacking = false
     print("⏹️ Auto-farm stopped!")
-end
-
--- Find and teleport to scroll
-local function findAndTeleportToScroll(type)
-    local scrolls = findScrolls()
-    local scrollList = type == "boss" and scrolls.Boss or scrolls.Normal
-    
-    if #scrollList > 0 then
-        teleportToScroll(scrollList[1])
-        task.wait(0.5)
-        interactWithScroll(scrollList[1])
-    else
-        print("❌ No", type, "scrolls found")
-    end
 end
 
 -- ============ UI ============
@@ -375,12 +299,18 @@ autofarmss:CreateCheckbox("📋 Auto Grind Normal Missions", function(state)
     if state and CONFIG.AutoGrindBoss then
         CONFIG.AutoGrindBoss = false
     end
+    if state and CONFIG.AutoGrindBoth then
+        CONFIG.AutoGrindBoth = false
+    end
 end)
 
 autofarmss:CreateCheckbox("👑 Auto Grind Boss Missions", function(state)
     CONFIG.AutoGrindBoss = state
     if state and CONFIG.AutoGrindNormal then
         CONFIG.AutoGrindNormal = false
+    end
+    if state and CONFIG.AutoGrindBoth then
+        CONFIG.AutoGrindBoth = false
     end
 end)
 
@@ -392,68 +322,83 @@ autofarmss:CreateCheckbox("⭐ Auto Grind Both", function(state)
     end
 end)
 
-autofarmss:CreateCheckbox("⚔️ Auto Click/M1", function(state)
-    CONFIG.AutoClick = state
-end):SetValue(true)
-
-autofarmss:CreateSlider("Farm Delay (seconds)", 5, 0.2, function(value)
+autofarmss:CreateSlider("Farm Delay (seconds)", 5, 0.5, function(value)
     CONFIG.FarmDelay = value
-end):SetValue(0.5)
-
-autofarmss:CreateSlider("Click Delay (seconds)", 1, 0.05, function(value)
-    CONFIG.ClickDelay = value
-end):SetValue(0.1)
+end):SetValue(1)
 
 -- Manual Controls
-autofarmss:CreateButton("📍 Teleport to Normal Scroll", function()
-    findAndTeleportToScroll("normal")
+autofarmss:CreateButton("📍 Teleport to Normal NPC", function()
+    local npcs = findMissionNPCs()
+    if #npcs > 0 then
+        teleportToNPCAndTalk(npcs[1])
+    else
+        print("❌ No normal NPCs found")
+    end
 end)
 
 autofarmss:CreateButton("📍 Teleport to Boss Scroll", function()
-    findAndTeleportToScroll("boss")
+    local scrolls = findBossScrolls()
+    if #scrolls > 0 then
+        teleportToBossScroll(scrolls[1])
+    else
+        print("❌ No boss scrolls found")
+    end
 end)
 
-autofarmss:CreateButton("🎯 Find & Teleport to Enemy", function()
-    teleportToEnemyAndAttack()
+autofarmss:CreateButton("🔍 Scan for NPCs", function()
+    local npcs = findMissionNPCs()
+    print("📋 Found", #npcs, "mission NPCs")
+    for _, npc in ipairs(npcs) do
+        print("   -", npc.Name)
+    end
+end)
+
+autofarmss:CreateButton("🔍 Scan for Boss Scrolls", function()
+    local scrolls = findBossScrolls()
+    print("📋 Found", #scrolls, "boss scrolls")
+    for _, scroll in ipairs(scrolls) do
+        print("   -", scroll.Name)
+    end
 end)
 
 -- Main Tab
-main:CreateButton("📍 Teleport to Normal Scroll", function()
-    findAndTeleportToScroll("normal")
+main:CreateButton("📍 Teleport to Normal NPC", function()
+    local npcs = findMissionNPCs()
+    if #npcs > 0 then
+        teleportToNPCAndTalk(npcs[1])
+    end
 end)
 
 main:CreateButton("📍 Teleport to Boss Scroll", function()
-    findAndTeleportToScroll("boss")
-end)
-
-main:CreateButton("🎯 Find & Teleport to Enemy", function()
-    teleportToEnemyAndAttack()
-end)
-
-main:CreateButton("⚔️ Attack Enemy", function()
-    attackEnemy()
-end)
-
-main:CreateButton("🔍 Scan for Scrolls", function()
-    local scrolls = findScrolls()
-    print("📋 Found", #scrolls.Normal, "normal scrolls and", #scrolls.Boss, "boss scrolls")
-    for _, scroll in ipairs(scrolls.Normal) do
-        print("   - Normal:", scroll.Name)
+    local scrolls = findBossScrolls()
+    if #scrolls > 0 then
+        teleportToBossScroll(scrolls[1])
     end
-    for _, scroll in ipairs(scrolls.Boss) do
-        print("   - Boss:", scroll.Name)
+end)
+
+main:CreateButton("🔍 Scan for NPCs", function()
+    local npcs = findMissionNPCs()
+    print("📋 Found", #npcs, "mission NPCs")
+    for _, npc in ipairs(npcs) do
+        print("   -", npc.Name)
+    end
+end)
+
+main:CreateButton("🔍 Scan for Boss Scrolls", function()
+    local scrolls = findBossScrolls()
+    print("📋 Found", #scrolls, "boss scrolls")
+    for _, scroll in ipairs(scrolls) do
+        print("   -", scroll.Name)
     end
 end)
 
 print("✅ Shindo Life Auto Farm loaded!")
 print("")
 print("🔧 FEATURES:")
-print("   - 🔄 Automatic grinding loop")
-print("   - 📍 Teleports to mission scrolls")
-print("   - 🎯 Teleports to enemies")
-print("   - ⚔️ Auto attacks with M1")
-print("   - 📋 Normal & Boss mission support")
-print("   - ⭐ Both mode (normal + boss)")
+print("   - 📋 Normal Missions: Teleports to NPCs and starts conversation")
+print("   - 👑 Boss Missions: Teleports to scrolls and starts mission")
+print("   - ⭐ Both Mode: Does both normal and boss missions")
+print("   - 🔍 Scan for available NPCs and scrolls")
 print("")
 print("🚀 Toggle 'Auto-Farm' to start!")
 print("📌 Select a grind mode (Normal, Boss, or Both)")
