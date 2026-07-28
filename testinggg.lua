@@ -26,7 +26,7 @@ local farmLoop = nil
 
 -- ============ HELPER FUNCTIONS ============
 
--- Function to find hidden instances (from your raw code)
+-- Function to find hidden instances
 function getNil(name, class)
     for _, v in pairs(getnilinstances()) do
         if v.ClassName == class and v.Name == name then
@@ -57,14 +57,13 @@ local function getNormalMissions()
     return missions
 end
 
--- Accept normal mission (using your raw code)
+-- Accept normal mission
 local function acceptNormalMission(mission)
     if not mission or not mission.Object then return false end
     
     local talkEvent = mission.Object:FindFirstChild("CLIENTTALK")
     if not talkEvent then return false end
     
-    -- Using the exact format from your raw code
     local args = {
         [1] = "accept"
     }
@@ -78,7 +77,7 @@ local function acceptNormalMission(mission)
     return false
 end
 
--- Target NPC for normal mission (using your raw code)
+-- Target NPC for normal mission
 local function targetNPCMission(npcName)
     local targetHRP = nil
     
@@ -104,7 +103,6 @@ local function targetNPCMission(npcName)
         return false
     end
     
-    -- Using the exact format from your raw code
     local args = {
         [1] = "target",
         [2] = targetHRP
@@ -144,14 +142,13 @@ local function getBossMissions()
     return missions
 end
 
--- Accept boss mission (using your raw code)
+-- Accept boss mission
 local function acceptBossMission(mission)
     if not mission or not mission.Object then return false end
     
     local talkEvent = mission.Object:FindFirstChild("CLIENTTALK")
     if not talkEvent then return false end
     
-    -- Using the exact format from your raw code
     local args = {
         [1] = "accept"
     }
@@ -165,7 +162,7 @@ local function acceptBossMission(mission)
     return false
 end
 
--- Target NPC for boss mission (using your raw code with specific NPCs)
+-- Target NPC for boss mission
 local function targetBossNPC(npcName)
     local targetHRP = nil
     
@@ -191,7 +188,6 @@ local function targetBossNPC(npcName)
         return false
     end
     
-    -- Using the exact format from your raw code
     local args = {
         [1] = "target",
         [2] = targetHRP
@@ -206,7 +202,7 @@ local function targetBossNPC(npcName)
     return false
 end
 
--- Check mission list (using your raw code)
+-- Check mission list
 local function checkMissions()
     pcall(function()
         local compSystem = Workspace:FindFirstChild("newcompsystem")
@@ -222,48 +218,75 @@ local function checkMissions()
     return nil
 end
 
--- ============ TELEPORT FUNCTIONS ============
+-- ============ GRIND FUNCTIONS ============
 
--- Teleport to a specific position
-local function teleportToPosition(position)
-    local character = LocalPlayer.Character
-    if not character then return false end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    
-    pcall(function()
-        hrp.CFrame = CFrame.new(position)
-        return true
-    end)
-    
-    return false
+-- Grind Normal Missions
+local function grindNormal()
+    print("📋 Grinding normal missions...")
+    local missions = getNormalMissions()
+    if #missions > 0 then
+        for _, mission in ipairs(missions) do
+            acceptNormalMission(mission)
+            task.wait(0.5)
+            
+            if CONFIG.AutoTargetNPCs then
+                local npcName = mission.Name
+                targetNPCMission(npcName)
+                task.wait(0.3)
+                
+                -- Also try with "npc" prefix
+                if not Workspace:FindFirstChild("npc"):FindFirstChild(npcName) then
+                    targetNPCMission("npc" .. npcName)
+                    task.wait(0.3)
+                end
+            end
+            
+            task.wait(CONFIG.FarmDelay)
+        end
+    else
+        print("ℹ️ No normal missions available")
+    end
 end
 
--- Teleport to NPC or scroll
-local function teleportToObject(object)
-    if not object then return false end
-    
-    local targetPart = object:FindFirstChild("HumanoidRootPart") or object:FindFirstChild("Head")
-    
-    if not targetPart then
-        -- Try to find any BasePart
-        for _, child in ipairs(object:GetChildren()) do
-            if child:IsA("BasePart") then
-                targetPart = child
-                break
+-- Grind Boss Missions
+local function grindBoss()
+    print("👑 Grinding boss missions...")
+    local missions = getBossMissions()
+    if #missions > 0 then
+        for _, mission in ipairs(missions) do
+            acceptBossMission(mission)
+            task.wait(0.5)
+            
+            if CONFIG.AutoTargetNPCs then
+                -- Boss missions use specific NPCs
+                local bossNPCs = {
+                    ["Bankai Akuma"] = "npc4",
+                    ["Dio Senko"] = "npc6",
+                }
+                
+                local npcName = bossNPCs[mission.Name]
+                if npcName then
+                    targetBossNPC(npcName)
+                    task.wait(0.3)
+                else
+                    -- Try to find matching NPC
+                    local npcFolder = Workspace:FindFirstChild("npc")
+                    if npcFolder then
+                        for _, npc in ipairs(npcFolder:GetChildren()) do
+                            if npc.Name:lower():match(mission.Name:lower():sub(1, 3)) then
+                                targetBossNPC(npc.Name)
+                                break
+                            end
+                        end
+                    end
+                end
             end
+            
+            task.wait(CONFIG.FarmDelay)
         end
+    else
+        print("ℹ️ No boss missions available")
     end
-    
-    if not targetPart then
-        print("❌ Could not find target part")
-        return false
-    end
-    
-    -- Teleport to the object (slightly above)
-    local teleportPos = targetPart.Position + Vector3.new(0, 2, 0)
-    return teleportToPosition(teleportPos)
 end
 
 -- ============ MAIN FARM LOOP ============
@@ -278,82 +301,19 @@ local function farmLoopFunction()
         
         print("🔄 Farming cycle...")
         
-        -- Handle Normal Missions
-        if CONFIG.AutoGrindNormal or CONFIG.AutoGrindBoth then
-            print("📋 Processing normal missions...")
-            
-            -- Get all normal missions
-            local normalMissions = getNormalMissions()
-            if #normalMissions > 0 then
-                for _, mission in ipairs(normalMissions) do
-                    -- Accept the mission
-                    acceptNormalMission(mission)
-                    task.wait(0.5)
-                    
-                    -- Target the NPC based on mission name
-                    if CONFIG.AutoTargetNPCs then
-                        -- Try different NPC naming patterns
-                        local npcName = mission.Name
-                        targetNPCMission(npcName)
-                        task.wait(0.3)
-                        
-                        -- Also try with "npc" prefix if not found
-                        if not Workspace:FindFirstChild("npc"):FindFirstChild(npcName) then
-                            targetNPCMission("npc" .. npcName)
-                            task.wait(0.3)
-                        end
-                    end
-                    
-                    task.wait(CONFIG.FarmDelay)
-                end
-            else
-                print("ℹ️ No normal missions available")
-            end
+        -- Check which modes are enabled and run them
+        if CONFIG.AutoGrindNormal then
+            grindNormal()
         end
         
-        -- Handle Boss Missions
-        if CONFIG.AutoGrindBoss or CONFIG.AutoGrindBoth then
-            print("👑 Processing boss missions...")
-            
-            -- Get all boss missions
-            local bossMissions = getBossMissions()
-            if #bossMissions > 0 then
-                for _, mission in ipairs(bossMissions) do
-                    -- Accept the boss mission
-                    acceptBossMission(mission)
-                    task.wait(0.5)
-                    
-                    -- Target the boss NPC
-                    if CONFIG.AutoTargetNPCs then
-                        -- Boss missions use specific NPCs (npc4, npc6, etc.)
-                        local bossNPCs = {
-                            ["Bankai Akuma"] = "npc4",
-                            ["Dio Senko"] = "npc6",
-                        }
-                        
-                        local npcName = bossNPCs[mission.Name]
-                        if npcName then
-                            targetBossNPC(npcName)
-                            task.wait(0.3)
-                        else
-                            -- Try to find matching NPC
-                            local npcFolder = Workspace:FindFirstChild("npc")
-                            if npcFolder then
-                                for _, npc in ipairs(npcFolder:GetChildren()) do
-                                    if npc.Name:lower():match(mission.Name:lower():sub(1, 3)) then
-                                        targetBossNPC(npc.Name)
-                                        break
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    
-                    task.wait(CONFIG.FarmDelay)
-                end
-            else
-                print("ℹ️ No boss missions available")
-            end
+        if CONFIG.AutoGrindBoss then
+            grindBoss()
+        end
+        
+        if CONFIG.AutoGrindBoth then
+            grindNormal()
+            task.wait(CONFIG.FarmDelay)
+            grindBoss()
         end
         
         -- Check mission list
@@ -389,7 +349,8 @@ autofarmss:CreateCheckbox("🔁 Auto-Farm", function(state)
     end
 end)
 
-autofarmss:CreateCheckbox("📋 Auto Grind Normal Missions", function(state)
+-- Specific Grind Mode Checkboxes
+autofarmss:CreateCheckbox("📋 Auto Grind Normal", function(state)
     CONFIG.AutoGrindNormal = state
     if state then
         CONFIG.AutoGrindBoss = false
@@ -397,7 +358,7 @@ autofarmss:CreateCheckbox("📋 Auto Grind Normal Missions", function(state)
     end
 end)
 
-autofarmss:CreateCheckbox("👑 Auto Grind Boss Missions", function(state)
+autofarmss:CreateCheckbox("👑 Auto Grind Boss", function(state)
     CONFIG.AutoGrindBoss = state
     if state then
         CONFIG.AutoGrindNormal = false
@@ -421,39 +382,19 @@ autofarmss:CreateSlider("Farm Delay (seconds)", 5, 0.5, function(value)
     CONFIG.FarmDelay = value
 end):SetValue(1.5)
 
--- Manual Controls - Normal Missions
-autofarmss:CreateButton("📋 Accept All Normal Missions", function()
-    local missions = getNormalMissions()
-    for _, mission in ipairs(missions) do
-        acceptNormalMission(mission)
-        task.wait(0.3)
-    end
+-- Manual Controls
+autofarmss:CreateButton("📋 Grind Normal Now", function()
+    grindNormal()
 end)
 
-autofarmss:CreateButton("📍 Target Normal NPC", function()
-    local missions = getNormalMissions()
-    if #missions > 0 then
-        targetNPCMission(missions[1].Name)
-    end
+autofarmss:CreateButton("👑 Grind Boss Now", function()
+    grindBoss()
 end)
 
--- Manual Controls - Boss Missions
-autofarmss:CreateButton("👑 Accept All Boss Missions", function()
-    local missions = getBossMissions()
-    for _, mission in ipairs(missions) do
-        acceptBossMission(mission)
-        task.wait(0.3)
-    end
-end)
-
-autofarmss:CreateButton("📍 Target Boss NPC", function()
-    -- Target first available boss NPC
-    local bossNPCs = {"npc4", "npc6"}
-    for _, npcName in ipairs(bossNPCs) do
-        if targetBossNPC(npcName) then
-            break
-        end
-    end
+autofarmss:CreateButton("⭐ Grind Both Now", function()
+    grindNormal()
+    task.wait(CONFIG.FarmDelay)
+    grindBoss()
 end)
 
 -- Scan Buttons
@@ -478,34 +419,18 @@ autofarmss:CreateButton("📋 Check Mission List", function()
 end)
 
 -- Main Tab
-main:CreateButton("📋 Accept All Missions", function()
-    local normalMissions = getNormalMissions()
-    for _, mission in ipairs(normalMissions) do
-        acceptNormalMission(mission)
-        task.wait(0.3)
-    end
-    
-    local bossMissions = getBossMissions()
-    for _, mission in ipairs(bossMissions) do
-        acceptBossMission(mission)
-        task.wait(0.3)
-    end
+main:CreateButton("📋 Grind Normal", function()
+    grindNormal()
 end)
 
-main:CreateButton("🎯 Target All NPCs", function()
-    -- Target normal NPCs
-    local normalMissions = getNormalMissions()
-    for _, mission in ipairs(normalMissions) do
-        targetNPCMission(mission.Name)
-        task.wait(0.3)
-    end
-    
-    -- Target boss NPCs
-    local bossNPCs = {"npc4", "npc6"}
-    for _, npcName in ipairs(bossNPCs) do
-        targetBossNPC(npcName)
-        task.wait(0.3)
-    end
+main:CreateButton("👑 Grind Boss", function()
+    grindBoss()
+end)
+
+main:CreateButton("⭐ Grind Both", function()
+    grindNormal()
+    task.wait(CONFIG.FarmDelay)
+    grindBoss()
 end)
 
 main:CreateButton("🔍 Scan Everything", function()
@@ -530,12 +455,9 @@ end)
 
 print("✅ Shindo Life Auto Farm loaded!")
 print("")
-print("🔧 FEATURES:")
-print("   - 📋 Normal Missions: Accepts and targets NPCs")
-print("   - 👑 Boss Missions: Accepts and targets bosses")
-print("   - ⭐ Both Mode: Does both normal and boss missions")
-print("   - 🎯 Auto targets NPCs after accepting missions")
-print("   - 🔍 Scan for available missions")
+print("🔧 GRIND MODES:")
+print("   - 📋 Normal: Grinds normal missions only")
+print("   - 👑 Boss: Grinds boss missions only")
+print("   - ⭐ Both: Grinds both normal and boss missions")
 print("")
-print("🚀 Toggle 'Auto-Farm' to start!")
-print("📌 Select a grind mode (Normal, Boss, or Both)")
+print("📌 Select ONE grind mode, then toggle Auto-Farm!")
