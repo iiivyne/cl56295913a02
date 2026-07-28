@@ -10,6 +10,7 @@ local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Configuration
 local CONFIG = {
@@ -23,9 +24,20 @@ local CONFIG = {
 local farmRunning = false
 local farmLoop = nil
 
+-- Safe getnilinstances function (only works in certain executors)
+local function getNilInstancesSafe()
+    local success, result = pcall(function()
+        return getnilinstances()
+    end)
+    if success then
+        return result or {}
+    end
+    return {}
+end
+
 -- Function to find hidden instances
 function getNil(name, class)
-    for _, v in pairs(getnilinstances()) do
+    for _, v in pairs(getNilInstancesSafe()) do
         if v.ClassName == class and v.Name == name then
             return v
         end
@@ -98,21 +110,24 @@ local function getTargetableNPCs()
         end
     end
     
-    -- Check for hidden NPCs
-    for _, v in pairs(getnilinstances()) do
-        if v.ClassName == "Model" and v:FindFirstChild("HumanoidRootPart") then
-            local name = v.Name
-            if name:match("npc") or name:match("boss") or name:match("target") then
-                local targetHrp = v.HumanoidRootPart
-                local distance = (hrp.Position - targetHrp.Position).Magnitude
-                
-                if distance <= CONFIG.TargetDistance then
-                    table.insert(npcs, {
-                        Name = name,
-                        HRP = targetHrp,
-                        Distance = distance,
-                        Type = "hidden"
-                    })
+    -- Check for hidden NPCs (only if function exists)
+    local hiddenInstances = getNilInstancesSafe()
+    if hiddenInstances then
+        for _, v in pairs(hiddenInstances) do
+            if v.ClassName == "Model" and v:FindFirstChild("HumanoidRootPart") then
+                local name = v.Name
+                if name:match("npc") or name:match("boss") or name:match("target") then
+                    local targetHrp = v.HumanoidRootPart
+                    local distance = (hrp.Position - targetHrp.Position).Magnitude
+                    
+                    if distance <= CONFIG.TargetDistance then
+                        table.insert(npcs, {
+                            Name = name,
+                            HRP = targetHrp,
+                            Distance = distance,
+                            Type = "hidden"
+                        })
+                    end
                 end
             end
         end
@@ -131,7 +146,7 @@ local function acceptMission(mission)
     local talkEvent = mission.Object:FindFirstChild("CLIENTTALK")
     if not talkEvent then return false end
     
-    local success, err = pcall(function()
+    local success = pcall(function()
         talkEvent:FireServer("accept")
         print("✅ Accepted mission:", mission.Name)
     end)
@@ -143,12 +158,24 @@ end
 local function targetNPC(npc)
     if not npc or not npc.HRP then return false end
     
-    local success, err = pcall(function()
+    -- Check if startevent exists
+    local startEvent = LocalPlayer:FindFirstChild("startevent")
+    if not startEvent then
+        print("⚠️ startevent not found, trying alternative...")
+        -- Try to find it in ReplicatedStorage
+        startEvent = ReplicatedStorage:FindFirstChild("startevent")
+        if not startEvent then
+            print("❌ startevent not found anywhere!")
+            return false
+        end
+    end
+    
+    local success = pcall(function()
         local args = {
             [1] = "target",
             [2] = npc.HRP
         }
-        LocalPlayer.startevent:FireServer(unpack(args))
+        startEvent:FireServer(unpack(args))
         print("✅ Targeted NPC:", npc.Name)
     end)
     
@@ -237,6 +264,42 @@ local function stopFarming()
     print("⏹️ Auto-farm stopped!")
 end
 
+-- Bring NPCs to you
+local function bringNPCsToYou()
+    local character = LocalPlayer.Character
+    if not character then 
+        print("❌ No character found")
+        return 
+    end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then 
+        print("❌ No HumanoidRootPart found")
+        return 
+    end
+    
+    local npcFolder = Workspace:FindFirstChild("npc")
+    if not npcFolder then
+        print("❌ No NPC folder found")
+        return
+    end
+    
+    local count = 0
+    for _, child in ipairs(npcFolder:GetChildren()) do
+        if child:IsA("Model") and child:FindFirstChild("HumanoidRootPart") then
+            local targetHrp = child.HumanoidRootPart
+            if targetHrp then
+                pcall(function()
+                    targetHrp.CFrame = hrp.CFrame + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
+                    count = count + 1
+                    task.wait(0.1)
+                end)
+            end
+        end
+    end
+    print("✅ Brought", count, "NPCs to you!")
+end
+
 -- ============ UI ============
 
 -- Auto Farm Tab
@@ -292,28 +355,10 @@ end)
 
 -- Info Display
 autofarmss:CreateLabel("📊 Status: Ready")
-autofarmss:CreateLabel("📌 Missions Found: " .. #getAvailableMissions())
-autofarmss:CreateLabel("🎯 NPCs Found: " .. #getTargetableNPCs())
 
--- Mob TP Tab (for bringing mobs to you)
+-- Mob TP Tab
 charactertp:CreateButton("🔄 Bring All NPCs To You", function()
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    local npcFolder = Workspace:FindFirstChild("npc")
-    if npcFolder then
-        for _, child in ipairs(npcFolder:GetChildren()) do
-            if child:IsA("Model") and child:FindFirstChild("HumanoidRootPart") then
-                local targetHrp = child.HumanoidRootPart
-                targetHrp.CFrame = hrp.CFrame + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
-                task.wait(0.1)
-            end
-        end
-    end
-    print("✅ Brought all NPCs to you!")
+    bringNPCsToYou()
 end)
 
 -- Main Tab - Quick Actions
@@ -338,22 +383,7 @@ main:CreateButton("🎯 Target All NPCs", function()
 end)
 
 main:CreateButton("🔄 Bring All NPCs To You", function()
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    local npcFolder = Workspace:FindFirstChild("npc")
-    if npcFolder then
-        for _, child in ipairs(npcFolder:GetChildren()) do
-            if child:IsA("Model") and child:FindFirstChild("HumanoidRootPart") then
-                local targetHrp = child.HumanoidRootPart
-                targetHrp.CFrame = hrp.CFrame + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
-                task.wait(0.1)
-            end
-        end
-    end
+    bringNPCsToYou()
 end)
 
 print("✅ Shindo Life Auto Farm loaded!")
@@ -362,7 +392,7 @@ print("🔧 FEATURES:")
 print("   - 🔄 Automatic farming loop")
 print("   - 📋 Accepts all available missions")
 print("   - 🎯 Targets NPCs in range")
-print("   - 🔍 Finds hidden NPCs")
+print("   - 🔍 Finds hidden NPCs (if supported)")
 print("   - 📊 Distance-based targeting")
 print("   - 🔄 Bring NPCs to you")
 print("")
