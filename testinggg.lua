@@ -1,5 +1,5 @@
 local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/NexityHereLol/robloxluascripts/refs/heads/main/simplistic_lib"))()
-local int = lib:CreateInterface("99 Nights Auto Farm", "script made by lohjc", "https://discord.gg/ZNTHTWx7KE", "bottom left", "royal")
+local int = lib:CreateInterface("Shindo Life Auto Farm", "script made by lohjc", "https://discord.gg/ZNTHTWx7KE", "bottom left", "royal")
 
 -- Tabs
 local autofarmss = int:CreateTab("Auto", "auto farm utilities (OP)", "op")
@@ -356,7 +356,7 @@ main:CreateButton("🔄 Bring All NPCs To You", function()
     end
 end)
 
-print("✅ 99 Nights Auto Farm loaded!")
+print("✅ Shindo Life Auto Farm loaded!")
 print("")
 print("🔧 FEATURES:")
 print("   - 🔄 Automatic farming loop")
